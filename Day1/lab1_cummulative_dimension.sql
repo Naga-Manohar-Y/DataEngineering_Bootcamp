@@ -9,11 +9,11 @@ pts real,
 reb real,
 ast real
 )
-
+--------
 drop table players;
-
+--------
 create type scoring_class as enum ('star', 'good', 'average', 'bad');
-
+--------
 create table players(
 player_name text,
 height text,
@@ -28,9 +28,9 @@ years_since_last_season integer,
 current_season integer,
 primary key(player_name, current_season)
 );
-
+--------
 select * from players limit 5;
-
+---------
 insert into players
 with yesterday as (
 select * from players
@@ -40,7 +40,6 @@ today as (
 select * from player_seasons
 where season = 2001
 )
-
 select
 coalesce(t.player_name, y.player_name) as player_name,
 coalesce(t.height, y.height) as height,
@@ -78,10 +77,11 @@ coalesce (t.season, y.current_season + 1) as current_season
 from today t full outer join yesterday y
 on t.player_name = y.player_name;
 
+-------------------------------------------------------------
 select * from players
 where current_season = 1997
 and player_name = 'Michael Jordan';
-
+-------------------------------------------------------------
 with unnested as (
 select player_name, unnest(season_stats)::season_stats as season_stats
 from players
@@ -91,15 +91,15 @@ and player_name = 'Michael Jordan'
 
 select player_name, (season_stats).*
 from unnested
-
--- which player has big improvement from his first season to latest season
+---------------------------------------------------------------------------
 
 select player_name,
 (season_stats[1]::season_stats).pts as first_season,
 (season_stats[cardinality(season_stats)]::season_stats).pts as latest_season
 from players
 where current_season = 2001;
-
+---------------------------------------------------------------------------
+-- which player has big improvement from his first season to latest season
 
 select player_name,
 (season_stats[cardinality(season_stats)]::season_stats).pts/
