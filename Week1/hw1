@@ -20,7 +20,7 @@ votes integer,
 rating real,
 filmid text
 )
-
+DROP TYPE quality_class
 create type quality_class as enum('star', 'good', 'average', 'bad')
 
 select * from actor_films
@@ -28,62 +28,123 @@ WHERE year = 1972
 limit 10;
 -------------------------- Actors table ----------------------------
 DROP TABLE actors;
--- CREATE TABLE actors (
--- actor text,
--- actorid text,
--- current_year integer,
--- films_arr film_struct[],
--- quality_class quality_class,
--- is_active BOOLEAN,
--- PRIMARY KEY (actorid, current_year)
--- );
 CREATE TABLE actors (
 actor text,
 actorid text,
 current_year integer,
 films_arr film_struct[],
+quality_class quality_class,
+is_active BOOLEAN,
 PRIMARY KEY (actorid, current_year)
 );
---------------------------
+------------------------------------------------------------
 --Cumulative table generation query: 
+WITH last_year AS (
+            SELECT *
+            FROM actors
+            WHERE current_year = 1969
+        ),
+        current_year AS (
+            SELECT actor, actorid, year,
+                ARRAY_AGG(ARRAY[ROW(
+                    film,
+                    votes,
+                    rating,
+                    filmid
+                )::film_struct]) AS films_arr,
+				AVG(rating) AS avg_rating
+            FROM actor_films
+            WHERE year = 1970
+            GROUP BY actor, actorid, year
+        )
+        SELECT 
+            COALESCE(c.actor, l.actor) AS actor,
+            COALESCE(c.actorid, l.actorid) AS actorid,
+            COALESCE(c.year, l.current_year + 1) AS current_year,
+            CASE 
+                WHEN l.films_arr IS NULL THEN c.films_arr
+                WHEN c.films_arr IS NOT NULL THEN l.films_arr || c.films_arr
+                ELSE l.films_arr
+            END AS films_arr,
+			CASE
+				WHEN c.avg_rating IS NOT NULL THEN
+					CASE 
+						WHEN c.avg_rating > 8 THEN 'star'
+						WHEN c.avg_rating > 7 THEN 'good'
+						WHEN c.avg_rating > 6 THEN 'average'
+						ELSE 'bad'
+					END::quality_class
+				ELSE l.quality_class
+			END AS quality_class,
+			CASE
+				WHEN c.year IS NOT NULL THEN TRUE
+				ELSE FALSE
+			END AS is_active
+        FROM current_year c
+        FULL OUTER JOIN last_year l
+            ON c.actorid = l.actorid;
+------------------------------------------------------------------------------------------------
 --Write a query that populates the actors table one year at a time.
 --(1970 to 2021)
 
-select * from actors;
+DO $$
+DECLARE
+    year_start INT := 1969; -- Starting year
+    year_end INT := 2021;   -- Ending year
+    loop_year INT;
+BEGIN
+    FOR loop_year IN year_start..year_end LOOP
+        INSERT INTO actors
+        WITH last_year AS (
+            SELECT *
+            FROM actors
+            WHERE current_year = loop_year - 1
+        ),
+        current_year AS (
+            SELECT actor, actorid, year,
+                ARRAY_AGG(ARRAY[ROW(
+                    film,
+                    votes,
+                    rating,
+                    filmid
+                )::film_struct]) AS films_arr,
+				AVG(rating) AS avg_rating
+            FROM actor_films
+            WHERE year = loop_year
+            GROUP BY actor, actorid, year
+        )
+        SELECT 
+            COALESCE(c.actor, l.actor) AS actor,
+            COALESCE(c.actorid, l.actorid) AS actorid,
+            COALESCE(c.year, l.current_year + 1) AS current_year,
+            CASE 
+                WHEN l.films_arr IS NULL THEN c.films_arr
+                WHEN c.films_arr IS NOT NULL THEN l.films_arr || c.films_arr
+                ELSE l.films_arr
+            END AS films_arr,
+			CASE
+				WHEN c.avg_rating IS NOT NULL THEN
+					CASE 
+						WHEN c.avg_rating > 8 THEN 'star'
+						WHEN c.avg_rating > 7 THEN 'good'
+						WHEN c.avg_rating > 6 THEN 'average'
+						ELSE 'bad'
+					END::quality_class
+				ELSE l.quality_class
+			END AS quality_class,
+			CASE
+				WHEN c.year IS NOT NULL THEN TRUE
+				ELSE FALSE
+			END AS is_active
+        FROM current_year c
+        FULL OUTER JOIN last_year l
+            ON c.actorid = l.actorid;
+    END LOOP;
+END $$;
+----------------------------------------------------------------------------------------------------------
 
-SELECT * FROM GENERATE_SERIES (1970, 2021) AS current_year
+select * from actors
+order by current_year desc
+limit 100;
 
-INSERT INTO actors
-
-WITH last_year AS (
-    SELECT *
-    FROM actors
-    WHERE current_year = 1971
-),
-current_year AS (
-    SELECT actor, actorid, max(year) as year,
-	ARRAY_AGG(ROW(
-                film,
-                votes,
-                rating,
-                filmid
-            )::film_struct) AS films_arr
-    FROM actor_films
-    WHERE year = 1972
-	GROUP BY actor, actorid
-)
-
-SELECT
-    COALESCE(c.actor, l.actor) AS actor,
-    COALESCE(c.actorid, l.actorid) AS actorid,
-    COALESCE(c.year, l.current_year) AS current_year,
-    CASE 
-        WHEN l.films_arr IS NULL THEN c.films_arr
-        WHEN c.films_arr IS NOT NULL THEN l.films_arr || c.films_arr
-        ELSE l.films_arr
-    END AS films_arr
-FROM current_year c
-LEFT JOIN last_year l
-    ON c.actorid = l.actorid;
-
-
+-----------------------------------------------------------------------------------------------------------
