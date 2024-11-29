@@ -1,0 +1,89 @@
+-- actor: The name of the actor.
+-- actorid: A unique identifier for each actor.
+-- film: The name of the film.
+-- year: The year the film was released.
+-- votes: The number of votes the film received.
+-- rating: The rating of the film.
+-- filmid: A unique identifier for each film.
+-- The primary key for this dataset is (actor_id, film_id).
+
+
+
+select distinct(year) from actor_films
+order by year;
+
+-- films struct, quality_class, is_active 
+---- films: An array of struct with the following fields:
+create type film_struct as (
+film text,
+votes integer,
+rating real,
+filmid text
+)
+
+create type quality_class as enum('star', 'good', 'average', 'bad')
+
+select * from actor_films
+WHERE year = 1972
+limit 10;
+-------------------------- Actors table ----------------------------
+DROP TABLE actors;
+-- CREATE TABLE actors (
+-- actor text,
+-- actorid text,
+-- current_year integer,
+-- films_arr film_struct[],
+-- quality_class quality_class,
+-- is_active BOOLEAN,
+-- PRIMARY KEY (actorid, current_year)
+-- );
+CREATE TABLE actors (
+actor text,
+actorid text,
+current_year integer,
+films_arr film_struct[],
+PRIMARY KEY (actorid, current_year)
+);
+--------------------------
+--Cumulative table generation query: 
+--Write a query that populates the actors table one year at a time.
+--(1970 to 2021)
+
+select * from actors;
+
+SELECT * FROM GENERATE_SERIES (1970, 2021) AS current_year
+
+INSERT INTO actors
+
+WITH last_year AS (
+    SELECT *
+    FROM actors
+    WHERE current_year = 1971
+),
+current_year AS (
+    SELECT actor, actorid, max(year) as year,
+	ARRAY_AGG(ROW(
+                film,
+                votes,
+                rating,
+                filmid
+            )::film_struct) AS films_arr
+    FROM actor_films
+    WHERE year = 1972
+	GROUP BY actor, actorid
+)
+
+SELECT
+    COALESCE(c.actor, l.actor) AS actor,
+    COALESCE(c.actorid, l.actorid) AS actorid,
+    COALESCE(c.year, l.current_year) AS current_year,
+    CASE 
+        WHEN l.films_arr IS NULL THEN c.films_arr
+        WHEN c.films_arr IS NOT NULL THEN l.films_arr || c.films_arr
+        ELSE l.films_arr
+    END AS films_arr
+FROM current_year c
+LEFT JOIN last_year l
+    ON c.actorid = l.actorid;
+
+
