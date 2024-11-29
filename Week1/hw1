@@ -147,4 +147,128 @@ select * from actors
 order by current_year desc
 limit 100;
 
------------------------------------------------------------------------------------------------------------
+---------------------------------actors_history_scd-----------------------------------------
+DROP TABLE actors_history_scd;
+
+CREATE TABLE actors_history_scd(
+actor TEXT,
+actorid TEXT,
+quality_class quality_class,
+is_active BOOLEAN,
+start_date INTEGER,
+end_date INTEGER,
+current_year INTEGER,
+PRIMARY KEY(actorid, start_date)
+);
+---------------------------------Inserting data using backfiling query-----------------------
+INSERT INTO actors_history_scd
+WITH with_previous AS(
+	SELECT
+		actor, actorid, quality_class, is_active,
+		LAG(quality_class,1) OVER (PARTITION BY actorid ORDER BY current_year) AS previous_quality_class,
+		LAG(is_active,1) OVER (PARTITION BY actorid ORDER BY current_year) AS previous_active_class,
+		current_year
+	FROM actors
+	WHERE current_year <= 2020),
+with_indicators AS(
+	SELECT *, 
+	CASE
+		WHEN quality_class <> previous_quality_class THEN 1
+		WHEN is_active <> previous_active_class THEN 1
+	END AS change_indicator
+	FROM with_previous
+),
+with_streaks AS(
+	SELECT *,
+	SUM(change_indicator) OVER (PARTITION BY actorid ORDER BY current_year) AS streak_identifier
+	FROM with_indicators
+)
+
+SELECT actor, actorid,
+	quality_class, is_active,
+	MIN(current_year) AS start_date,
+	MAX(current_year) AS end_date,
+	2020 AS current_year
+	FROM with_streaks
+	GROUP BY actor, actorid, streak_identifier, quality_class, is_active
+	ORDER BY actor, streak_identifier;
+-----------------------------------------------------------------------------------	
+CREATE TYPE scd_type AS (
+quality_class quality_class,
+is_active BOOLEAN,
+start_date INTEGER,
+end_date INTEGER
+);
+--------------------------------------------------------------------------------
+WITH last_year_scd AS (
+	SELECT * FROM actors_history_scd
+	WHERE current_year = 2020
+	AND end_date = 2020
+),
+historical_scd AS (
+	SELECT actor, actorid,
+		quality_class, is_active,
+		start_date,
+		end_date
+	FROM actors_history_scd
+	WHERE current_year = 2020
+	AND end_date < 2020
+),
+this_year_data AS (
+	SELECT * FROM actors
+	WHERE current_year = 2021
+),
+unchanged_records AS (
+	SELECT ty.actor, ty.actorid,
+		ty.quality_class, ty.is_active,
+		ly.start_date, ty.current_year AS end_date
+	FROM this_year_data ty JOIN last_year_scd ly
+	ON ty.actorid = ly.actorid
+	WHERE ty.quality_class = ly.quality_class
+	AND ty.is_active = ly.is_active
+),
+changed_records AS(
+SELECT ty.actor, ty.actorid,
+	UNNEST(ARRAY[
+			ROW(
+			ly.quality_class,
+			ly.is_active,
+			ly.start_date,
+			ly.end_date
+			)::scd_type,
+			ROW(
+			ty.quality_class,
+			ty.is_active,
+			ty.current_year,
+			ty.current_year
+			)::scd_type			
+	]) AS records
+	FROM this_year_data ty LEFT JOIN last_year_scd ly
+	ON ly.actorid = ty.actorid
+	WHERE (ty.quality_class <> ly.quality_class
+	OR ty.is_active <> ly.is_active)
+),
+unnested_changed_records AS (
+SELECT actor, actorid,
+	(records::scd_type).quality_class,
+	(records::scd_type).is_active,
+	(records::scd_type).start_date,
+(	records::scd_type).end_date
+FROM changed_records
+),
+new_records AS (
+SELECT ty.actor, ty.actorid,
+	ty.quality_class,ty.is_active,
+	ty.current_year AS start_date,
+	ty.current_year AS end_date
+FROM this_year_data ty LEFT JOIN last_year_scd ly
+ON ly.actorid = ty.actorid
+WHERE ly.actorid IS NULL
+)
+SELECT * FROM historical_scd
+UNION ALL
+SELECT * FROM unchanged_records
+UNION ALL
+SELECT * FROM unnested_changed_records
+UNION ALL
+SELECT * FROM new_records;
