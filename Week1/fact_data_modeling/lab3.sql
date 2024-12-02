@@ -6,7 +6,7 @@ CREATE TABLE array_metrics (
 	PRIMARY KEY (user_id, month_start, metric_name)
 );
 
-----------------------------
+------------------------------------------------------------------------
 -- DELETE FROM array_metrics
 INSERT INTO array_metrics
 WITH daily_aggregate AS (
@@ -15,7 +15,7 @@ WITH daily_aggregate AS (
 		DATE(event_time) AS date,
 		COUNT(1) AS num_site_hits
 	FROM events
-	WHERE DATE(event_time) = DATE('2023-01-02')
+	WHERE DATE(event_time) = DATE('2023-01-03')
 	AND user_id IS NOT NULL
 	GROUP BY user_id, DATE(event_time)
 ),
@@ -31,15 +31,36 @@ SELECT
 	CASE 
 		WHEN ya.metric_array IS NOT NULL 
 		THEN ya.metric_array || ARRAY[COALESCE(da.num_site_hits, 0)]
-		WHEN ya.month_start IS NULL 
-		THEN  ARRAY[COALESCE(da.num_site_hits, 0)]
 		WHEN ya.metric_array IS NULL 
-		THEN ARRAY_FILL(0, ARRAY[COALESCE(date - DATE(DATE_TRUNC('month',date)),0)]) || ARRAY[COALESCE(da.num_site_hits, 0)]
+		THEN ARRAY_FILL(0, ARRAY[COALESCE(date - DATE(DATE_TRUNC('month',date)),0)]) 
+		|| ARRAY[COALESCE(da.num_site_hits, 0)]
 	END AS metric_array
 FROM daily_aggregate da FULL OUTER JOIN yesterday_array ya 
 ON da.user_id = ya.user_id
 ON CONFLICT (user_id, month_start, metric_name)
 DO
 	UPDATE SET metric_array = EXCLUDED.metric_array;
----------------------------
+-----------------------------------------------------------------
 SELECT * FROM array_metrics;
+---------verify the cardinality of metric_array------------------
+
+SELECT cardinality(metric_array), COUNT(1)
+FROM array_metrics
+GROUP BY 1;
+--------Aggregate metrics by summing day wise hits in the metric_array------
+WITH agg AS (
+    SELECT metric_name, month_start, 
+	ARRAY[SUM(metric_array[1]), 
+		SUM(metric_array[2]), 
+		SUM(metric_array[3])] AS summed_array
+    FROM array_metrics
+    GROUP BY metric_name, month_start
+)
+-- Select and display the metric_name, date (adjusted by index), 
+-- and summed value
+SELECT 
+    metric_name, 
+    month_start + CAST(CAST(index - 1 AS TEXT) || ' day' AS INTERVAL) AS adjusted_date,
+    elem AS value
+FROM agg
+CROSS JOIN UNNEST(agg.summed_array) WITH ORDINALITY AS a(elem, index);
