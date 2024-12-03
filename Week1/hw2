@@ -1,0 +1,63 @@
+-- WITH dedup AS(
+-- SELECT *, ROW_NUMBER() OVER 
+-- 		(PARTITION BY game_id, team_id, player_id) AS row_num
+-- 	FROM game_details
+-- 	)
+
+-- SELECT * FROM dedup
+-- WHERE row_num =1;
+
+-- A DDL for an user_devices_cumulated table that has:
+
+-- a device_activity_datelist which tracks a users active days by browser_type
+-- data type here should look similar to MAP<STRING, ARRAY[DATE]>
+-- or you could have browser_type as a column with 
+-- multiple rows for each user (either way works, just be consistent!)
+-- A cumulative query to generate device_activity_datelist from events
+user_id, device_id, browser_type, 
+user_id, device_id, event_time
+
+DROP TABLE user_devices_cumulated;
+
+CREATE TABLE user_devices_cumulated(
+user_id TEXT,
+browser_type TEXT,
+dates_active DATE[],
+date DATE,
+PRIMARY KEY (user_id, browser_type, date)
+);
+
+WITH yesterday AS (
+SELECT * 
+FROM user_devices_cumulated
+WHERE date = DATE('2023-01-01')
+),
+today AS (
+	select CAST(e.user_id AS TEXT) AS user_id, 
+	DATE(CAST(e.event_time AS TIMESTAMP)) AS date_active,
+	d.browser_type AS browser_type
+	FROM events e JOIN devices d
+	ON e.device_id = d.device_id
+	WHERE DATE(CAST(event_time AS TIMESTAMP)) = DATE('2023-01-01') AND e.user_id IS NOT NULL
+)
+
+SELECT 
+	(t.user_id, y.user_id) AS user_id,
+	t.browser_type AS browser_type,
+	CASE
+		WHEN y.dates_active IS NULL THEN ARRAY[t.date_active]
+		WHEN t.date_active IS NULL THEN y.dates_active
+		ELSE ARRAY[t.date_active] || y.dates_active
+		END AS dates_active,
+	COALESCE(t.date_active, y.date + INTERVAL '1 day') AS date
+	
+	FROM today t FULL OUTER JOIN yesterday y
+	ON t.user_id = y.user_id;
+	
+
+
+
+select * from devices limit 5;
+
+select * from events limit 5;
+
