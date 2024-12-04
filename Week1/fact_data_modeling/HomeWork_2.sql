@@ -185,7 +185,7 @@ host TEXT,
 month_start DATE,
 hit_array REAL [],
 unique_visitors REAL [],
-PRIMARY KEY (host, month_start, hit_array)
+PRIMARY KEY (host, month_start)
 );
 -------------------
 DO $$
@@ -200,7 +200,7 @@ BEGIN
 			COUNT(user_id) AS num_site_hits,
 			COUNT(DISTINCT user_id) AS unique_visitors
 		FROM events
-		WHERE DATE(event_time) = current_loop_date 
+		WHERE DATE(event_time) =  current_loop_date
 		AND user_id IS NOT NULL 
 		GROUP BY host, DATE(CAST(event_time AS TIMESTAMP))
 		),
@@ -211,7 +211,7 @@ BEGIN
 		)
 		SELECT 
 			COALESCE(da.host, ya.host) as host,
-			COALESCE(da.date, ya.month_start) AS month_start,
+			COALESCE(da.date, ya.month_start + INTERVAL '1 Day') AS month_start,
 			CASE 
 				WHEN ya.hit_array IS NOT NULL 
 				THEN ya.hit_array || ARRAY[COALESCE(da.num_site_hits, 0)]
@@ -227,50 +227,9 @@ BEGIN
 				|| ARRAY[COALESCE(da.unique_visitors, 0)]
 			END AS unique_visitors
 		FROM daily_aggregates da FULL OUTER JOIN yesterday_array ya 
-		ON da.host = ya.host
-		
-		ON CONFLICT (host, month_start, hit_array)
-		DO
-			UPDATE SET hit_array = EXCLUDED.hit_array,
-			unique_visitors = EXCLUDED.unique_visitors;
+		ON da.host = ya.host;
 		current_loop_date := current_loop_date + INTERVAL '1 Day';
 	END LOOP;
 END $$;
 -----------------------------------------
--- INSERT INTO host_activity_reduced
--- 		WITH daily_aggregates AS (
--- 		SELECT host, DATE(CAST(event_time AS TIMESTAMP)) AS date, 
--- 			COUNT(user_id) AS num_site_hits,
--- 			COUNT(DISTINCT user_id) AS unique_visitors
--- 		FROM events
--- 		WHERE DATE(event_time) =  DATE('2023-01-03')
--- 		AND user_id IS NOT NULL 
--- 		GROUP BY host, DATE(CAST(event_time AS TIMESTAMP))
--- 		),
--- 		yesterday_array AS (
--- 			SELECT *
--- 			FROM host_activity_reduced
--- 			WHERE month_start = DATE('2023-01-02')
--- 		)
--- 		SELECT 
--- 			COALESCE(da.host, ya.host) as host,
--- 			COALESCE(da.date, ya.month_start) AS month_start,
--- 			CASE 
--- 				WHEN ya.hit_array IS NOT NULL 
--- 				THEN ya.hit_array || ARRAY[COALESCE(da.num_site_hits, 0)]
--- 				WHEN ya.hit_array IS NULL 
--- 				THEN ARRAY_FILL(0, ARRAY[COALESCE(date - DATE(DATE_TRUNC('month',date)),0)]) 
--- 				|| ARRAY[COALESCE(da.num_site_hits, 0)]
--- 			END AS hit_array,
--- 			CASE 
--- 				WHEN ya.unique_visitors IS NOT NULL 
--- 				THEN ya.unique_visitors || ARRAY[COALESCE(da.unique_visitors, 0)]
--- 				WHEN ya.unique_visitors IS NULL 
--- 				THEN ARRAY_FILL(0, ARRAY[COALESCE(date - DATE(DATE_TRUNC('month',date)),0)]) 
--- 				|| ARRAY[COALESCE(da.unique_visitors, 0)]
--- 			END AS unique_visitors
--- 		FROM daily_aggregates da FULL OUTER JOIN yesterday_array ya 
--- 		ON da.host = ya.host;
-
-		
 SELECT * FROM host_activity_reduced;
